@@ -1,6 +1,6 @@
 name: flutter_meon_kyc
 description: "A comprehensive Flutter package for handling Know Your Customer (KYC) processes with automatic permissions, IPV support, payment integration, and complete lifecycle management."
-version: 2.0.0
+version: 2.0.5
 homepage: https://github.com/your-repo/flutter-meon-kyc
 
 environment:

@@ -21,7 +21,7 @@ Add `flutter_meon_kyc` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  flutter_meon_kyc: ^1.2.1
+  flutter_meon_kyc: ^2.0.5
 ```
 
 Run:
@@ -34,18 +34,32 @@ flutter pub get
 
 ### Android
 
-Add the following permissions to your `android/app/src/main/AndroidManifest.xml`:
+#### 1. Required permissions
 
 ```xml
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Required permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Optional, but recommended for some OEMs when capturing video/audio -->
+    <uses-permission android:name="android.permission.VIDEO_CAPTURE" />
+    <uses-permission android:name="android.permission.AUDIO_CAPTURE" />
+
+    <!-- Recommended hardware features -->
+    <uses-feature android:name="android.hardware.camera" android:required="true" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" />
+    <uses-feature android:name="android.hardware.location.network" />
     
-    <!-- Optional: For payment links -->
+    <!-- Optional: For payment links (UPI apps visibility) -->
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
@@ -65,10 +79,57 @@ Add the following permissions to your `android/app/src/main/AndroidManifest.xml`
         </intent>
     </queries>
 
-    <application>
-        <!-- Your app configuration -->
+    <application
+        android:name="${applicationName}"
+        android:label="Your App Name"
+        android:icon="@mipmap/ic_launcher"
+        android:requestLegacyExternalStorage="true">
+
+        <!-- FileProvider needed by flutter_inappwebview for camera/photo capture -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.flutter_inappwebview_android.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/flutter_inappwebview_file_paths" />
+        </provider>
+
+        <!-- Your MainActivity and other configuration -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
     </application>
 </manifest>
+```
+
+Also create the `flutter_inappwebview_file_paths.xml` resource file referenced above:
+
+```xml
+<!-- android/app/src/main/res/xml/flutter_inappwebview_file_paths.xml -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <external-files-path
+        name="images"
+        path="Pictures" />
+    <external-files-path
+        name="camera"
+        path="." />
+</paths>
 ```
 
 Update `android/app/build.gradle`:
@@ -93,16 +154,17 @@ Add the following to your `ios/Runner/Info.plist`:
     <!-- Camera permission -->
     <key>NSCameraUsageDescription</key>
     <string>Camera access is required for KYC verification</string>
-    
+
     <!-- Microphone permission -->
     <key>NSMicrophoneUsageDescription</key>
     <string>Microphone access is required for video verification</string>
-    
+
     <!-- Location permission -->
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Location access is required for KYC verification</string>
-    
-    <!-- Optional: Allow arbitrary loads for specific domains -->
+
+    <!-- Optional: Allow arbitrary loads for KYC domains.
+         For stricter ATS, you can instead whitelist only Meon KYC hosts. -->
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoads</key>
