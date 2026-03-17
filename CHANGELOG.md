@@ -1,3 +1,8 @@
+## [2.0.5] - 2026-03-17
+### Fixed
+- Resolved header padding behavior across Android and iOS for consistent button alignment.
+- Added missing `flutter_inappwebview` dependency to `pubspec.yaml` so the package validates and compiles correctly.
+
 ## [2.0.0] - 2025-11-25
 ### Added
 - **Complete Rewrite**: New `MeonKYC` widget with comprehensive features matching React Native implementation
