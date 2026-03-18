@@ -1,3 +1,7 @@
+## [2.0.6] - 2026-03-18
+### Changed
+- Version bump for pub.dev release.
+
 ## [2.0.5] - 2026-03-17
 ### Fixed
 - Resolved header padding behavior across Android and iOS for consistent button alignment.

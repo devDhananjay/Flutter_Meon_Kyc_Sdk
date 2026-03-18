@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -465,7 +467,9 @@ class _MeonKYCState extends State<MeonKYC> {
   Future<bool> _showUpiAppChooser(String upiUrl) async {
     try {
       final uri = Uri.parse(upiUrl);
-      final query = uri.query;
+      // Rebuild query to ensure proper encoding on Android deep links.
+      // Some UPI apps are strict about encoding / path formats.
+      final query = Uri(queryParameters: uri.queryParameters).query;
 
       // Build explicit UPI URLs for each app using the same payment params.
       final options = <_UpiAppOption>[
@@ -483,13 +487,15 @@ class _MeonKYCState extends State<MeonKYC> {
         ),
         _UpiAppOption(
           'Paytm',
-          Uri.parse('paytmmp://upi/pay?$query'),
+          // Paytm commonly expects paytmmp://pay?... (not paytmmp://upi/pay?...).
+          Uri.parse('paytmmp://pay?$query'),
           icon: Icons.account_balance,
           color: const Color(0xFF00B9F1),
         ),
         _UpiAppOption(
           'PhonePe',
-          Uri.parse('phonepe://upi/pay?$query'),
+          // PhonePe commonly expects phonepe://pay?... (not phonepe://upi/pay?...).
+          Uri.parse('phonepe://pay?$query'),
           icon: Icons.account_balance_wallet_outlined,
           color: const Color(0xFF5F259F),
         ),
@@ -539,6 +545,48 @@ class _MeonKYCState extends State<MeonKYC> {
 
       if (selected == null) {
         return false;
+      }
+
+      // Android: open specific app directly (avoid chooser).
+      // If it fails, we fall back to url_launcher behavior below.
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        String? packageName;
+        if (selected.name == 'BHIM') {
+          packageName = 'in.org.npci.upiapp';
+        } else if (selected.name == 'GPay') {
+          packageName = 'com.google.android.apps.nbu.paisa.user';
+        } else if (selected.name == 'WhatsApp') {
+          packageName = 'com.whatsapp';
+        }
+
+        if (packageName != null) {
+          try {
+            await AndroidIntent(
+              action: 'action_view',
+              data: selected.uri.toString(),
+              package: packageName,
+            ).launch();
+            return true;
+          } catch (e) {
+            _logger.w(
+              '[MeonKYC] Android intent launch failed for ${selected.name} ($packageName): $e',
+            );
+
+            // WhatsApp Business fallback (if installed instead of personal).
+            if (selected.name == 'WhatsApp') {
+              try {
+                await AndroidIntent(
+                  action: 'action_view',
+                  data: selected.uri.toString(),
+                  package: 'com.whatsapp.w4b',
+                ).launch();
+                return true;
+              } catch (e) {
+                _logger.w('[MeonKYC] Android intent launch failed for WhatsApp Business: $e');
+              }
+            }
+          }
+        }
       }
 
       // Try to open the selected app; if it fails, fall back to the generic UPI URL.
