@@ -1,3 +1,9 @@
+## [2.0.7] - 2026-08-13
+### Fixed
+- Session logout now clears WebView cookies/storage properly (not only HTTP logout).
+- Initial KYC start uses WebView logout flow for a fresh session.
+- Hide logout success page text from users (blank white cover during logout).
+
 ## [2.0.6] - 2026-03-18
 ### Changed
 - Version bump for pub.dev release.

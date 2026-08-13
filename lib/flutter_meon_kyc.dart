@@ -106,6 +106,32 @@ class _MeonKYCState extends State<MeonKYC> {
   bool _initialLogoutDone = false;
   bool _hasReloadedAfterPermissions = false;
   bool _hideHeaderForCurrentPage = false;
+  /// WebView pehle logout URL load karega, phir KYC.
+  bool _waitingForLogoutNavigation = false;
+
+  String get _logoutUrl =>
+      '${widget.baseURL}/${widget.companyName}/logout';
+
+  String get _kycEntryUrl =>
+      '${widget.baseURL}/${widget.companyName}/${widget.workflow}';
+
+  static const String _hidePageContentJs = '''
+    (function() {
+      try {
+        var style = document.getElementById('meon-hide-logout');
+        if (!style) {
+          style = document.createElement('style');
+          style.id = 'meon-hide-logout';
+          style.textContent = 'html,body,*{visibility:hidden!important;background:#fff!important;color:transparent!important;}';
+          (document.head || document.documentElement).appendChild(style);
+        }
+        if (document.body) {
+          document.body.innerHTML = '';
+          document.body.style.background = '#fff';
+        }
+      } catch (e) {}
+    })();
+  ''';
 
   @override
   void initState() {
@@ -113,7 +139,70 @@ class _MeonKYCState extends State<MeonKYC> {
     _performInitialLogout();
   }
 
-  /// Perform initial logout before starting KYC
+  /// Clear WebView cookies/session (used after success / helpers).
+  Future<void> _clearWebViewSession({required String reason}) async {
+    final cookieManager = CookieManager.instance();
+
+    try {
+      _logger.i('[MeonKYC] Clearing WebView session ($reason)...');
+
+      final cookies = await cookieManager.getCookies(
+        url: WebUri(widget.baseURL),
+      );
+      final cookieHeader = cookies
+          .map((c) => '${c.name}=${c.value}')
+          .where((pair) => pair != '=')
+          .join('; ');
+
+      try {
+        final response = await http.get(
+          Uri.parse(_logoutUrl),
+          headers: {
+            'Accept': 'application/json, text/plain, */*',
+            if (cookieHeader.isNotEmpty) 'Cookie': cookieHeader,
+          },
+        );
+
+        if (response.statusCode == 200) {
+          _logger.i('[MeonKYC] Logout API ok ($reason): ${response.body}');
+        } else {
+          _logger.w(
+            '[MeonKYC] Logout API status ${response.statusCode} ($reason)',
+          );
+        }
+      } catch (e) {
+        _logger.e('[MeonKYC] Logout API error ($reason): $e');
+      }
+
+      try {
+        await _webViewController?.evaluateJavascript(source: '''
+          (function() {
+            try { localStorage.clear(); } catch (e) {}
+            try { sessionStorage.clear(); } catch (e) {}
+          })();
+        ''');
+      } catch (e) {
+        _logger.w('[MeonKYC] Storage clear skipped ($reason): $e');
+      }
+
+      await cookieManager.deleteAllCookies();
+      await _webViewController?.clearCache();
+      _logger.i('[MeonKYC] WebView cookies/cache cleared ($reason)');
+    } catch (e) {
+      _logger.e('[MeonKYC] Error clearing WebView session ($reason): $e');
+    }
+  }
+
+  Future<void> _hideLogoutPageContent(
+    InAppWebViewController? controller,
+  ) async {
+    if (controller == null) return;
+    try {
+      await controller.evaluateJavascript(source: _hidePageContentJs);
+    } catch (_) {}
+  }
+
+  /// WebView logout flow: open /logout (hidden), clear session, then KYC.
   Future<void> _performInitialLogout() async {
     if (widget.companyName.isEmpty) {
       const errorMsg = 'companyName is required';
@@ -126,25 +215,13 @@ class _MeonKYCState extends State<MeonKYC> {
     }
 
     if (!_initialLogoutDone) {
-      try {
-        _logger.i('[MeonKYC] Performing initial logout...');
-        final logoutUrl = '${widget.baseURL}/${widget.companyName}/logout';
-
-        final response = await http.get(Uri.parse(logoutUrl));
-
-        if (response.statusCode == 200) {
-          _logger.i('[MeonKYC] Initial logout successful: ${response.body}');
-        } else {
-          _logger.w('[MeonKYC] Initial logout failed with status: ${response.statusCode}');
-        }
-      } catch (e) {
-        _logger.e('[MeonKYC] Error in initial logout: $e');
-        // Continue even if logout fails
-      }
-
+      _logger.i('[MeonKYC] Clearing WebView session (initial)...');
+      _waitingForLogoutNavigation = true;
+      _currentUrl = _logoutUrl;
       _initialLogoutDone = true;
     }
 
+    if (!mounted) return;
     setState(() {
       _isLoading = false;
     });
@@ -152,11 +229,10 @@ class _MeonKYCState extends State<MeonKYC> {
     _initializeWebView();
   }
 
-  /// Initialize WebView controller (InAppWebView now creates the controller)
   void _initializeWebView() {
-    // No-op for InAppWebView. Kept for backward compatibility with the
-    // initialization flow; the actual controller is created in build().
-    _currentUrl = '${widget.baseURL}/${widget.companyName}/${widget.workflow}';
+    if (_currentUrl.isEmpty) {
+      _currentUrl = _waitingForLogoutNavigation ? _logoutUrl : _kycEntryUrl;
+    }
   }
 
   /// Check if URL is an IPV step
@@ -700,6 +776,11 @@ class _MeonKYCState extends State<MeonKYC> {
       _currentUrl = url;
     });
 
+    // Logout page pe "logout successfully" text hide karo (blank white).
+    if (_waitingForLogoutNavigation) {
+      _hideLogoutPageContent(_webViewController);
+    }
+
     final isCurrentlyIpvStep = _checkIfIpvStep(url);
 
     if (isCurrentlyIpvStep && !_isIpvStep && widget.autoRequestPermissions) {
@@ -732,6 +813,46 @@ class _MeonKYCState extends State<MeonKYC> {
       );
       return;
     }
+
+    // WebView logout done → clear session → open KYC (no logout text shown).
+    if (_waitingForLogoutNavigation) {
+      _logger.i(
+        '[MeonKYC] Logout navigation finished ($url), starting fresh KYC...',
+      );
+      await _hideLogoutPageContent(_webViewController);
+
+      try {
+        await _webViewController?.evaluateJavascript(source: '''
+          (function() {
+            try { localStorage.clear(); } catch (e) {}
+            try { sessionStorage.clear(); } catch (e) {}
+          })();
+        ''');
+      } catch (e) {
+        _logger.w('[MeonKYC] Storage clear on logout page failed: $e');
+      }
+
+      try {
+        await CookieManager.instance().deleteAllCookies();
+        await _webViewController?.clearCache();
+      } catch (e) {
+        _logger.w('[MeonKYC] Cookie/cache clear after logout failed: $e');
+      }
+
+      if (mounted) {
+        setState(() {
+          _waitingForLogoutNavigation = false;
+        });
+      } else {
+        _waitingForLogoutNavigation = false;
+      }
+
+      await _webViewController?.loadUrl(
+        urlRequest: URLRequest(url: WebUri(_kycEntryUrl)),
+      );
+      return;
+    }
+
     setState(() {
       _webViewLoading = false;
       _webViewRendered = true;
@@ -942,22 +1063,8 @@ class _MeonKYCState extends State<MeonKYC> {
         _successCalled = true;
         _logger.i('[MeonKYC] KYC completed successfully');
 
-        // Perform logout before calling onSuccess
-        try {
-          _logger.i('[MeonKYC] Performing logout...');
-          final logoutUrl = '${widget.baseURL}/${widget.companyName}/logout';
-
-          final response = await http.get(Uri.parse(logoutUrl));
-
-          if (response.statusCode == 200) {
-            _logger.i('[MeonKYC] Logout successful: ${response.body}');
-          } else {
-            _logger.w('[MeonKYC] Logout failed with status: ${response.statusCode}');
-          }
-        } catch (e) {
-          _logger.e('[MeonKYC] Error in logout: $e');
-          // Continue even if logout fails
-        }
+        // Clear WebView session before calling onSuccess
+        await _clearWebViewSession(reason: 'success');
 
         // Call onSuccess after logout
         widget.onSuccess?.call({
@@ -1212,14 +1319,22 @@ class _MeonKYCState extends State<MeonKYC> {
           decoration: containerDecoration ?? const BoxDecoration(color: Colors.white),
           child: Column(
             children: [
-              if (widget.showHeader && !_hideHeaderForCurrentPage && _renderHeader() != null)
+              if (widget.showHeader &&
+                  !_hideHeaderForCurrentPage &&
+                  !_waitingForLogoutNavigation &&
+                  _renderHeader() != null)
                 _renderHeader()!,
               Expanded(
                 child: Stack(
                   children: [
                     InAppWebView(
                       initialUrlRequest: URLRequest(
-                        url: WebUri('${widget.baseURL}/${widget.companyName}/${widget.workflow}'),
+                        url: WebUri(
+                          _waitingForLogoutNavigation ||
+                                  _currentUrl.contains('/logout')
+                              ? _logoutUrl
+                              : _kycEntryUrl,
+                        ),
                       ),
                       initialSettings: InAppWebViewSettings(
                         javaScriptEnabled: true,
@@ -1245,10 +1360,14 @@ class _MeonKYCState extends State<MeonKYC> {
                           },
                         );
                       },
-                      onLoadStart: (controller, url) {
-                        if (url != null) {
-                          _handlePageStarted(url.toString());
+                      onLoadStart: (controller, url) async {
+                        if (url == null) return;
+                        final urlStr = url.toString();
+                        // Sirf logout phase mein page blank rakho.
+                        if (_waitingForLogoutNavigation) {
+                          await _hideLogoutPageContent(controller);
                         }
+                        _handlePageStarted(urlStr);
                       },
                       onLoadStop: (controller, url) async {
                         if (url != null) {
@@ -1299,7 +1418,12 @@ class _MeonKYCState extends State<MeonKYC> {
                         );
                       },
                     ),
-                    if (_webViewLoading)
+                    // Blank white cover — NO "Initializing KYC" / logout text.
+                    if (_waitingForLogoutNavigation)
+                      const Positioned.fill(
+                        child: ColoredBox(color: Colors.white),
+                      ),
+                    if (_webViewLoading && !_waitingForLogoutNavigation)
                       Positioned(
                         top: 10,
                         right: 10,
