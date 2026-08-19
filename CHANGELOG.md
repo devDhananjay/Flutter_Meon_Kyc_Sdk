@@ -1,3 +1,9 @@
+## [2.1.1] - 2026-08-19
+### Added
+- SSO API now sends `additional_info: { "skip": "yes" }` by default (override with `additionalInfo`).
+- New `isRedirect` parameter (default `true`) for SSO `/get_sso_route`.
+- SSO `redirect_url` defaults to `https://www.google.com` when `redirectUrl` is omitted.
+
 ## [2.1.0] - 2026-08-19
 ### Added
 - Optional SSO KYC flow via `/get_sso_route`. Pass `mobileNumber` and `secretKey` to start KYC from the API `short_url`.

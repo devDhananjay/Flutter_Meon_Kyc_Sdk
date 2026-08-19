@@ -79,10 +79,18 @@ class MeonKYC extends StatefulWidget {
   final String? secretKey;
 
   /// Optional redirect URL after KYC (SSO flow). Sent as `redirect_url`.
+  /// Defaults to `https://www.google.com` in the SSO API body when omitted.
   final String? redirectUrl;
 
   /// Whether the SSO API should send a notification. Defaults to false.
   final bool notification;
+
+  /// Extra SSO payload sent as `additional_info`.
+  /// Defaults to `{ "skip": "yes" }` when omitted.
+  final Map<String, dynamic>? additionalInfo;
+
+  /// SSO `is_redirect` flag. Defaults to true.
+  final bool isRedirect;
 
   const MeonKYC({
     Key? key,
@@ -102,6 +110,8 @@ class MeonKYC extends StatefulWidget {
     this.secretKey,
     this.redirectUrl,
     this.notification = false,
+    this.additionalInfo,
+    this.isRedirect = true,
   }) : super(key: key);
 
   @override
@@ -219,9 +229,12 @@ class _MeonKYCState extends State<MeonKYC> {
         'unique_keys': {
           'mobile_number': widget.mobileNumber!.trim(),
         },
-        'additional_info': <String, dynamic>{},
-        'is_redirect': redirect.isNotEmpty,
-        'redirect_url': redirect,
+        'additional_info': widget.additionalInfo ??
+            <String, dynamic>{'skip': 'yes'},
+        'is_redirect': widget.isRedirect,
+        'redirect_url': redirect.isNotEmpty
+            ? redirect
+            : 'https://www.google.com',
       };
 
       final response = await http.post(

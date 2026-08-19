@@ -1,6 +1,6 @@
 # flutter_meon_kyc
 
-**Current version: `2.1.0`**
+**Current version: `2.1.1`**
 
 A comprehensive Flutter package for handling Know Your Customer (KYC) processes in mobile applications. This package provides an advanced WebView-based KYC solution with automatic permission handling, IPV (In-Person Verification) support, payment link integration, SSO session start, and complete lifecycle management.
 
@@ -36,7 +36,7 @@ Add `flutter_meon_kyc` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  flutter_meon_kyc: ^2.1.0
+  flutter_meon_kyc: ^2.1.1
 ```
 
 Run:
@@ -318,14 +318,15 @@ class SsoKYCScreen extends StatelessWidget {
   "unique_keys": {
     "mobile_number": "9411441937"
   },
-  "additional_info": {},
+  "additional_info": {"skip": "yes"},
   "is_redirect": true,
   "redirect_url": "https://www.google.com"
 }
 ```
 
 - `unique_keys.mobile_number` comes from the `mobileNumber` argument.
-- `is_redirect` is `true` only when `redirectUrl` is a non-empty string; otherwise it is `false` and `redirect_url` is `""`.
+- `additional_info` defaults to `{ "skip": "yes" }` (override with `additionalInfo`).
+- `is_redirect` defaults to `true`. If `redirectUrl` is omitted, `redirect_url` is `https://www.google.com`.
 
 #### SSO API response (used by the package)
 
@@ -545,8 +546,10 @@ class KYCScreen extends StatelessWidget {
 |-----------|------|---------|-------------|
 | `mobileNumber` | `String?` | `null` | Sent as `unique_keys.mobile_number`. Must be set together with `secretKey`. |
 | `secretKey` | `String?` | `null` | Company secret for `/get_sso_route`. Must be set together with `mobileNumber`. |
-| `redirectUrl` | `String?` | `null` | Optional SSO `redirect_url`. When non-empty, `is_redirect` is sent as `true`. |
+| `redirectUrl` | `String?` | `null` | SSO `redirect_url`. Defaults to `https://www.google.com` in the API body when omitted |
 | `notification` | `bool` | `false` | SSO `notification` flag |
+| `additionalInfo` | `Map<String, dynamic>?` | `{ "skip": "yes" }` | SSO `additional_info` |
+| `isRedirect` | `bool` | `true` | SSO `is_redirect` flag |
 
 If `mobileNumber` is set without `secretKey` (or the reverse), KYC does not start and `onError` is called with:  
 `mobileNumber and secretKey are both required for SSO KYC`.
@@ -711,7 +714,7 @@ Enable detailed logging by checking console output. The package uses the `logger
 
 ## Requirements
 
-- **Package version**: 2.1.0
+- **Package version**: 2.1.1
 - **Flutter**: >= 1.17.0
 - **Dart SDK**: >= 2.19.0 < 4.0.0
 - **Android**: minSdkVersion 21+
