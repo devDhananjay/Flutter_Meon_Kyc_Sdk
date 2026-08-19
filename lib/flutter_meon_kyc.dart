@@ -70,6 +70,20 @@ class MeonKYC extends StatefulWidget {
   /// Base URL for the KYC service
   final String baseURL;
 
+  /// Mobile number for SSO `unique_keys`. When set with [secretKey],
+  /// KYC starts via `/get_sso_route` and the returned `short_url` is opened.
+  /// Existing clients that omit this continue to use the direct KYC URL.
+  final String? mobileNumber;
+
+  /// Secret key for `/get_sso_route` (required when [mobileNumber] is set).
+  final String? secretKey;
+
+  /// Optional redirect URL after KYC (SSO flow). Sent as `redirect_url`.
+  final String? redirectUrl;
+
+  /// Whether the SSO API should send a notification. Defaults to false.
+  final bool notification;
+
   const MeonKYC({
     Key? key,
     required this.companyName,
@@ -84,6 +98,10 @@ class MeonKYC extends StatefulWidget {
     this.showHeader = true,
     this.headerTitle = 'KYC Process',
     this.baseURL = 'https://live.meon.co.in',
+    this.mobileNumber,
+    this.secretKey,
+    this.redirectUrl,
+    this.notification = false,
   }) : super(key: key);
 
   @override
@@ -109,11 +127,26 @@ class _MeonKYCState extends State<MeonKYC> {
   /// WebView pehle logout URL load karega, phir KYC.
   bool _waitingForLogoutNavigation = false;
 
+  /// SSO `short_url` from `/get_sso_route`. Null when using the direct KYC URL.
+  String? _ssoShortUrl;
+
+  bool get _isSsoMode {
+    final mobile = widget.mobileNumber?.trim() ?? '';
+    final secret = widget.secretKey?.trim() ?? '';
+    return mobile.isNotEmpty && secret.isNotEmpty;
+  }
+
   String get _logoutUrl =>
       '${widget.baseURL}/${widget.companyName}/logout';
 
   String get _kycEntryUrl =>
       '${widget.baseURL}/${widget.companyName}/${widget.workflow}';
+
+  /// After logout, open SSO short_url when available; otherwise the direct KYC URL.
+  String get _kycLoadUrl =>
+      (_ssoShortUrl != null && _ssoShortUrl!.isNotEmpty)
+          ? _ssoShortUrl!
+          : _kycEntryUrl;
 
   static const String _hidePageContentJs = '''
     (function() {
@@ -136,7 +169,99 @@ class _MeonKYCState extends State<MeonKYC> {
   @override
   void initState() {
     super.initState();
-    _performInitialLogout();
+    _startKycFlow();
+  }
+
+  void _startKycFlow() {
+    final hasMobile = (widget.mobileNumber?.trim() ?? '').isNotEmpty;
+    final hasSecret = (widget.secretKey?.trim() ?? '').isNotEmpty;
+
+    if (hasMobile != hasSecret) {
+      const errorMsg =
+          'mobileNumber and secretKey are both required for SSO KYC';
+      setState(() {
+        _error = errorMsg;
+        _isLoading = false;
+      });
+      widget.onError?.call(errorMsg);
+      return;
+    }
+
+    if (_isSsoMode) {
+      _fetchSsoRouteAndStart();
+    } else {
+      _performInitialLogout();
+    }
+  }
+
+  /// Call `/get_sso_route`, then start the same logout + WebView flow.
+  Future<void> _fetchSsoRouteAndStart() async {
+    if (widget.companyName.isEmpty) {
+      const errorMsg = 'companyName is required';
+      setState(() {
+        _error = errorMsg;
+        _isLoading = false;
+      });
+      widget.onError?.call(errorMsg);
+      return;
+    }
+
+    try {
+      _logger.i('[MeonKYC] Fetching SSO route...');
+
+      final uri = Uri.parse('${widget.baseURL}/get_sso_route');
+      final redirect = widget.redirectUrl?.trim() ?? '';
+      final body = <String, dynamic>{
+        'company': widget.companyName,
+        'workflowName': widget.workflow,
+        'secret_key': widget.secretKey!.trim(),
+        'notification': widget.notification,
+        'unique_keys': {
+          'mobile_number': widget.mobileNumber!.trim(),
+        },
+        'additional_info': <String, dynamic>{},
+        'is_redirect': redirect.isNotEmpty,
+        'redirect_url': redirect,
+      };
+
+      final response = await http.post(
+        uri,
+        headers: const {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: json.encode(body),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('SSO API status ${response.statusCode}');
+      }
+
+      final decoded = json.decode(response.body);
+      if (decoded is! Map<String, dynamic>) {
+        throw Exception('SSO API returned an unexpected response');
+      }
+
+      final shortUrl = decoded['short_url']?.toString().trim() ?? '';
+      if (shortUrl.isEmpty) {
+        throw Exception('SSO API did not return short_url');
+      }
+
+      _ssoShortUrl = shortUrl;
+      _logger.i('[MeonKYC] SSO short_url received, starting WebView...');
+
+      if (!mounted) return;
+      await _performInitialLogout();
+    } catch (e) {
+      _logger.e('[MeonKYC] SSO route error: $e');
+      const errorMsg = 'Failed to start SSO KYC';
+      if (!mounted) return;
+      setState(() {
+        _error = errorMsg;
+        _isLoading = false;
+      });
+      widget.onError?.call('$errorMsg: $e');
+    }
   }
 
   /// Clear WebView cookies/session (used after success / helpers).
@@ -231,7 +356,7 @@ class _MeonKYCState extends State<MeonKYC> {
 
   void _initializeWebView() {
     if (_currentUrl.isEmpty) {
-      _currentUrl = _waitingForLogoutNavigation ? _logoutUrl : _kycEntryUrl;
+      _currentUrl = _waitingForLogoutNavigation ? _logoutUrl : _kycLoadUrl;
     }
   }
 
@@ -848,7 +973,7 @@ class _MeonKYCState extends State<MeonKYC> {
       }
 
       await _webViewController?.loadUrl(
-        urlRequest: URLRequest(url: WebUri(_kycEntryUrl)),
+        urlRequest: URLRequest(url: WebUri(_kycLoadUrl)),
       );
       return;
     }
@@ -1263,8 +1388,13 @@ class _MeonKYCState extends State<MeonKYC> {
                 setState(() {
                   _error = null;
                   _isLoading = true;
+                  _ssoShortUrl = null;
+                  _initialLogoutDone = false;
+                  _waitingForLogoutNavigation = false;
+                  _successCalled = false;
+                  _webViewRendered = false;
                 });
-                _performInitialLogout();
+                _startKycFlow();
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF0047AB),
@@ -1333,7 +1463,7 @@ class _MeonKYCState extends State<MeonKYC> {
                           _waitingForLogoutNavigation ||
                                   _currentUrl.contains('/logout')
                               ? _logoutUrl
-                              : _kycEntryUrl,
+                              : _kycLoadUrl,
                         ),
                       ),
                       initialSettings: InAppWebViewSettings(

@@ -1,10 +1,13 @@
 # flutter_meon_kyc
 
-A comprehensive Flutter package for handling Know Your Customer (KYC) processes in mobile applications. This package provides an advanced WebView-based KYC solution with automatic permission handling, IPV (In-Person Verification) support, payment link integration, and complete lifecycle management.
+**Current version: `2.1.0`**
+
+A comprehensive Flutter package for handling Know Your Customer (KYC) processes in mobile applications. This package provides an advanced WebView-based KYC solution with automatic permission handling, IPV (In-Person Verification) support, payment link integration, SSO session start, and complete lifecycle management.
 
 ## Features
 
 - 🚀 **Easy Integration** - Simple API with sensible defaults
+- 🔑 **Two start modes** - Normal KYC URL flow, or SSO via `/get_sso_route`
 - 🎯 **Automatic Permission Management** - Camera, microphone, and location permissions
 - 👤 **IPV Support** - In-Person Verification with automatic detection
 - 💳 **Payment Link Handling** - UPI and payment app integration
@@ -15,13 +18,25 @@ A comprehensive Flutter package for handling Know Your Customer (KYC) processes 
 - 🔒 **Error Handling** - Comprehensive error management
 - 📊 **Logging** - Built-in logging for debugging
 
+## Which flow should I use?
+
+| | Normal KYC | SSO KYC |
+|---|---|---|
+| **When** | Existing clients / open the company KYC page directly | User is identified by mobile number; start a unique SSO session |
+| **Extra fields** | None | `mobileNumber` + `secretKey` (required together) |
+| **Optional SSO fields** | — | `redirectUrl`, `notification` |
+| **What opens in WebView** | `{baseURL}/{companyName}/{workflow}` | `short_url` returned by `/get_sso_route` |
+| **After WebView opens** | Same (IPV, UPI, permissions, success, logout) | Same |
+
+Existing apps that already use `MeonKYC(companyName: ...)` do **not** need to change anything. SSO is opt-in.
+
 ## Installation
 
 Add `flutter_meon_kyc` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  flutter_meon_kyc: ^2.0.5
+  flutter_meon_kyc: ^2.1.0
 ```
 
 Run:
@@ -181,12 +196,30 @@ platform :ios, '12.0'
 
 ## Usage
 
-### Basic Usage
+Import once, then choose **Normal** or **SSO**. Both use the same `MeonKYC` widget, callbacks, IPV, payments, and success detection.
 
 ```dart
-import 'package:flutter/material.dart';
 import 'package:flutter_meon_kyc/flutter_meon_kyc.dart';
+```
 
+---
+
+### 1. Normal KYC flow
+
+Use this when you only have `companyName` (and optionally `workflow`). No SSO API is called.
+
+#### How it works
+
+1. Widget starts and clears any previous WebView session (`/{companyName}/logout`).
+2. WebView opens the KYC entry URL:
+   `{baseURL}/{companyName}/{workflow}`  
+   Example: `https://live.meon.co.in/your-company-name/individual`
+3. User completes KYC in the WebView (documents, IPV, payments, etc.).
+4. On success, session is cleared and `onSuccess` is called.
+
+#### Code
+
+```dart
 class KYCScreen extends StatelessWidget {
   const KYCScreen({Key? key}) : super(key: key);
 
@@ -195,14 +228,13 @@ class KYCScreen extends StatelessWidget {
     return Scaffold(
       body: MeonKYC(
         companyName: 'your-company-name',
+        workflow: 'individual',
         onSuccess: (data) {
           print('KYC Completed: $data');
-          // Handle success - navigate to next screen
           Navigator.of(context).pop();
         },
         onError: (error) {
           print('KYC Error: $error');
-          // Handle error
         },
         onClose: () {
           print('KYC Closed');
@@ -214,16 +246,118 @@ class KYCScreen extends StatelessWidget {
 }
 ```
 
-### Advanced Usage
+Do **not** pass `mobileNumber` or `secretKey` for this flow.
+
+---
+
+### 2. SSO KYC flow
+
+Use this when the host app already knows the user's **mobile number** and you want a unique SSO session from `/get_sso_route`.
+
+`mobileNumber` and `secretKey` must be passed **together**. If only one is set, the widget reports an error and does not start KYC.
+
+#### How it works
+
+1. Widget calls `POST {baseURL}/get_sso_route` with company, workflow, secret key, and `unique_keys.mobile_number`.
+2. API returns `short_url` (and a longer `url`; the SDK uses **`short_url` only**).
+3. Widget clears any previous WebView session (`/{companyName}/logout`).
+4. WebView opens `short_url`.
+5. From here the journey is the same as Normal KYC: IPV, UPI, success detection, logout, callbacks.
+
+#### Code
+
+Pass `mobileNumber` from your frontend. It is sent as `unique_keys.mobile_number`.
+
+```dart
+class SsoKYCScreen extends StatelessWidget {
+  final String mobileNumber;
+  final String secretKey;
+
+  const SsoKYCScreen({
+    Key? key,
+    required this.mobileNumber,
+    required this.secretKey,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: MeonKYC(
+        companyName: 'your-company-name',
+        workflow: 'individual',
+        secretKey: secretKey,
+        mobileNumber: mobileNumber,
+        redirectUrl: 'https://www.google.com', // optional
+        notification: false, // optional, default false
+        onSuccess: (data) {
+          print('KYC Completed: $data');
+          Navigator.of(context).pop();
+        },
+        onError: (error) {
+          print('KYC Error: $error');
+        },
+        onClose: () {
+          Navigator.of(context).pop();
+        },
+      ),
+    );
+  }
+}
+```
+
+#### SSO API request (sent by the package)
+
+`POST https://live.meon.co.in/get_sso_route`
+
+```json
+{
+  "company": "your-company-name",
+  "workflowName": "individual",
+  "secret_key": "your-secret-key",
+  "notification": false,
+  "unique_keys": {
+    "mobile_number": "9411441937"
+  },
+  "additional_info": {},
+  "is_redirect": true,
+  "redirect_url": "https://www.google.com"
+}
+```
+
+- `unique_keys.mobile_number` comes from the `mobileNumber` argument.
+- `is_redirect` is `true` only when `redirectUrl` is a non-empty string; otherwise it is `false` and `redirect_url` is `""`.
+
+#### SSO API response (used by the package)
+
+```json
+{
+  "short_url": "https://live.meon.co.in/shorten/?6tqFBpn3730O",
+  "url": "http://live.meon.co.in/your-company-name/individual/..."
+}
+```
+
+The WebView loads `short_url`. The long `url` field is ignored.
+
+---
+
+### Advanced Usage (common options)
+
+These options work for **both** Normal and SSO flows.
 
 ```dart
 MeonKYC(
   // Required
   companyName: 'your-company-name',
-  
+
   // Optional - Workflow type
   workflow: 'individual', // or 'business', 'custom-workflow'
-  
+
+  // SSO only — omit both to use Normal flow
+  // mobileNumber: '9411441937',
+  // secretKey: 'your-secret-key',
+  // redirectUrl: 'https://www.google.com',
+  // notification: false,
+
   // Optional - Callbacks
   onSuccess: (data) {
     // data contains:
@@ -234,27 +368,27 @@ MeonKYC(
     print('Success: ${data['message']}');
     Navigator.of(context).pushReplacementNamed('/dashboard');
   },
-  
+
   onError: (error) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Error: $error')),
     );
   },
-  
+
   onClose: () {
     Navigator.of(context).pop();
   },
-  
+
   // Optional - Feature flags
   enableIPV: true, // Enable In-Person Verification
   enablePayments: true, // Enable payment link handling
   autoRequestPermissions: true, // Auto-request permissions for IPV
   showHeader: true, // Show custom header bar
-  
+
   // Optional - Customization
   headerTitle: 'Complete Your KYC',
   baseURL: 'https://live.meon.co.in', // Or your custom domain
-  
+
   // Optional - Custom styles
   customStyles: {
     'container': BoxDecoration(
@@ -279,7 +413,7 @@ MeonKYC(
 )
 ```
 
-### Full Example with Navigation
+### Full Example with Navigation (Normal flow)
 
 ```dart
 import 'package:flutter/material.dart';
@@ -345,7 +479,6 @@ class KYCScreen extends StatelessWidget {
         showHeader: true,
         headerTitle: 'Complete KYC',
         onSuccess: (data) {
-          // Show success dialog
           showDialog(
             context: context,
             builder: (context) => AlertDialog(
@@ -390,11 +523,11 @@ class KYCScreen extends StatelessWidget {
 |-----------|------|-------------|
 | `companyName` | `String` | Your company identifier (required) |
 
-#### Optional Parameters
+#### Common Optional Parameters (both flows)
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `workflow` | `String` | `'individual'` | KYC workflow type ('individual', 'business', etc.) |
+| `workflow` | `String` | `'individual'` | KYC workflow type (`'individual'`, `'business'`, etc.) |
 | `onSuccess` | `Function(Map<String, dynamic>)` | `null` | Called when KYC is completed successfully |
 | `onError` | `Function(String)` | `null` | Called when an error occurs |
 | `onClose` | `Function()` | `null` | Called when user closes the KYC screen |
@@ -404,7 +537,19 @@ class KYCScreen extends StatelessWidget {
 | `autoRequestPermissions` | `bool` | `true` | Auto-request permissions when IPV step is detected |
 | `showHeader` | `bool` | `true` | Show custom header with navigation controls |
 | `headerTitle` | `String` | `'KYC Process'` | Title text in the header |
-| `baseURL` | `String` | `'https://live.meon.co.in'` | Base URL for the KYC service |
+| `baseURL` | `String` | `'https://live.meon.co.in'` | Base URL for KYC and SSO APIs |
+
+#### SSO Parameters (omit all of these for Normal flow)
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `mobileNumber` | `String?` | `null` | Sent as `unique_keys.mobile_number`. Must be set together with `secretKey`. |
+| `secretKey` | `String?` | `null` | Company secret for `/get_sso_route`. Must be set together with `mobileNumber`. |
+| `redirectUrl` | `String?` | `null` | Optional SSO `redirect_url`. When non-empty, `is_redirect` is sent as `true`. |
+| `notification` | `bool` | `false` | SSO `notification` flag |
+
+If `mobileNumber` is set without `secretKey` (or the reverse), KYC does not start and `onError` is called with:  
+`mobileNumber and secretKey are both required for SSO KYC`.
 
 ### Callback Data Structures
 
@@ -465,7 +610,8 @@ Intelligent detection of KYC completion:
 ### 5. Session Management
 
 Complete lifecycle management:
-- **Initial Logout**: Cleans up any existing session before starting
+- **Initial Logout**: Cleans up any existing session before starting (Normal and SSO)
+- **SSO start**: If SSO params are present, `/get_sso_route` runs first, then logout, then `short_url`
 - **Final Logout**: Automatically logs out after successful completion
 - Graceful handling of logout failures
 
@@ -507,12 +653,20 @@ The custom header provides:
 2. Set `autoRequestPermissions: true`
 3. Check device settings to ensure permissions are granted
 
-### WebView Not Loading
+### WebView Not Loading (Normal flow)
 
 1. Verify `companyName` is correct
 2. Check network connectivity
 3. Ensure `baseURL` is accessible
 4. Check logs for detailed error messages
+
+### SSO KYC Not Starting
+
+1. Pass **both** `mobileNumber` and `secretKey`
+2. Confirm `secretKey` matches the company on the Meon dashboard
+3. Confirm `baseURL` (default `https://live.meon.co.in`) can reach `/get_sso_route`
+4. Look for `[MeonKYC] SSO route error` in logs
+5. Retry uses the same flow: SSO API is called again, then WebView opens `short_url`
 
 ### Payment Links Not Opening
 
@@ -536,7 +690,7 @@ SDKCall(
 )
 ```
 
-**New Code:**
+**New Code (Normal flow):**
 ```dart
 MeonKYC(
   companyName: 'company',
@@ -553,10 +707,11 @@ The `SDKCall` widget is deprecated but still available for backward compatibilit
 
 Enable detailed logging by checking console output. The package uses the `logger` package with tags:
 - `[MeonKYC]` - General messages
-- Look for permission, navigation, and success detection logs
+- Look for permission, navigation, SSO route, and success detection logs
 
 ## Requirements
 
+- **Package version**: 2.1.0
 - **Flutter**: >= 1.17.0
 - **Dart SDK**: >= 2.19.0 < 4.0.0
 - **Android**: minSdkVersion 21+
@@ -568,7 +723,7 @@ MIT License - See LICENSE file for details
 
 ## Support
 
-For issues and feature requests, please visit: [GitHub Issues](https://github.com/your-repo/flutter-meon-kyc/issues)
+For issues and feature requests, please visit: [GitHub Issues](https://github.com/devDhananjay/Flutter_Meon_Kyc_Sdk/issues)
 
 ## Changelog
 
@@ -576,4 +731,4 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and updates.
 
 ---
 
-**Note**: This package requires an active Meon KYC account and valid company configuration. Contact Meon support for setup assistance.
+**Note**: This package requires an active Meon KYC account and valid company configuration. SSO flow additionally requires a valid `secretKey`. Contact Meon support for setup assistance.

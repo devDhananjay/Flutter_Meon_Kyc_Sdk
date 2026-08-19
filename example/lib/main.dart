@@ -102,6 +102,29 @@ class HomePage extends StatelessWidget {
                 ),
               ),
             ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const SsoKycFormScreen(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.phonelink_lock),
+              label: const Text('Start SSO KYC'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 16,
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -111,10 +134,16 @@ class HomePage extends StatelessWidget {
 
 class KYCScreen extends StatelessWidget {
   final String workflow;
+  final String? mobileNumber;
+  final String? secretKey;
+  final String? redirectUrl;
 
   const KYCScreen({
     Key? key,
     this.workflow = 'individual',
+    this.mobileNumber,
+    this.secretKey,
+    this.redirectUrl,
   }) : super(key: key);
 
   @override
@@ -126,6 +155,11 @@ class KYCScreen extends StatelessWidget {
         
         // Workflow type - can be 'individual', 'business', etc.
         workflow: workflow,
+
+        // Optional SSO fields — omit these to keep the original KYC URL flow
+        mobileNumber: mobileNumber,
+        secretKey: secretKey,
+        redirectUrl: redirectUrl,
         
         // Enable IPV (In-Person Verification) features
         enableIPV: true,
@@ -225,6 +259,90 @@ class KYCScreen extends StatelessWidget {
             color: Colors.white,
           ),
         },
+      ),
+    );
+  }
+}
+
+class SsoKycFormScreen extends StatefulWidget {
+  const SsoKycFormScreen({Key? key}) : super(key: key);
+
+  @override
+  State<SsoKycFormScreen> createState() => _SsoKycFormScreenState();
+}
+
+class _SsoKycFormScreenState extends State<SsoKycFormScreen> {
+  final _mobileController = TextEditingController();
+  final _secretController = TextEditingController();
+
+  @override
+  void dispose() {
+    _mobileController.dispose();
+    _secretController.dispose();
+    super.dispose();
+  }
+
+  void _startSsoKyc() {
+    final mobile = _mobileController.text.trim();
+    final secret = _secretController.text.trim();
+
+    if (mobile.isEmpty || secret.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter mobile number and secret key'),
+        ),
+      );
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => KYCScreen(
+          mobileNumber: mobile,
+          secretKey: secret,
+          redirectUrl: 'https://www.google.com',
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('SSO KYC'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _mobileController,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'Mobile number',
+                hintText: '9411441937',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _secretController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Secret key',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: _startSsoKyc,
+              child: const Text('Start SSO KYC'),
+            ),
+          ],
+        ),
       ),
     );
   }

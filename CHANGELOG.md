@@ -1,3 +1,9 @@
+## [2.1.0] - 2026-08-19
+### Added
+- Optional SSO KYC flow via `/get_sso_route`. Pass `mobileNumber` and `secretKey` to start KYC from the API `short_url`.
+- Optional `redirectUrl` and `notification` for the SSO API payload.
+- Existing `MeonKYC` usage without these fields is unchanged (no breaking change).
+
 ## [2.0.7] - 2026-08-13
 ### Fixed
 - Session logout now clears WebView cookies/storage properly (not only HTTP logout).
