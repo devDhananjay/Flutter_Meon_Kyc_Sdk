@@ -1,6 +1,6 @@
 # flutter_meon_kyc
 
-**Current version: `2.1.1`**
+**Current version: `2.1.2`**
 
 A comprehensive Flutter package for handling Know Your Customer (KYC) processes in mobile applications. This package provides an advanced WebView-based KYC solution with automatic permission handling, IPV (In-Person Verification) support, payment link integration, SSO session start, and complete lifecycle management.
 
@@ -36,7 +36,7 @@ Add `flutter_meon_kyc` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  flutter_meon_kyc: ^2.1.1
+  flutter_meon_kyc: ^2.1.2
 ```
 
 Run:
@@ -262,7 +262,8 @@ Use this when the host app already knows the user's **mobile number** and you wa
 2. API returns `short_url` (and a longer `url`; the SDK uses **`short_url` only**).
 3. Widget clears any previous WebView session (`/{companyName}/logout`).
 4. WebView opens `short_url`.
-5. From here the journey is the same as Normal KYC: IPV, UPI, success detection, logout, callbacks.
+5. From here the journey is the same as Normal KYC: IPV, UPI, permissions, etc.
+6. When Meon redirects to your `redirect_url`, `onSuccess` fires **immediately** (WebView does not need to load that page).
 
 #### Code
 
@@ -563,7 +564,8 @@ If `mobileNumber` is set without `secretKey` (or the reverse), KYC does not star
   'status': 'completed',
   'timestamp': '2025-11-25T10:30:00.000Z',
   'url': 'https://live.meon.co.in/company/thank-you',
-  'message': 'KYC process completed successfully'
+  'message': 'KYC process completed successfully',
+  'trigger': 'thank_you_page' // or 'redirect_url'
 }
 ```
 
@@ -603,12 +605,22 @@ Supports opening payment apps directly:
 
 ### 4. Success Detection
 
-Intelligent detection of KYC completion:
-- Monitors page content for success patterns
-- Checks for: "Thank You" + "journey has been completed" + "Redirecting in"
-- Uses MutationObserver for dynamic content
-- Prevents duplicate success callbacks
-- Automatically performs logout before success callback
+**Dono triggers active hain** — jo pehle match ho, `onSuccess` ek baar call hota hai:
+
+| Trigger | Kab | `trigger` value |
+|---------|-----|-----------------|
+| **Thank You page** | Page par "Thank You" + "journey has been completed" + "Redirecting in" dikhe | `thank_you_page` |
+| **Redirect URL** | WebView aapke `redirect_url` par navigate kare (SSO / `isRedirect: true`) | `redirect_url` |
+
+- Pehle jo bhi fire ho, frontend ko turant response milta hai
+- Doosra trigger ignore hota hai (duplicate nahi)
+- Dono cases mein session clear + same response format
+
+```dart
+onSuccess: (data) {
+  print(data['trigger']); // 'thank_you_page' ya 'redirect_url'
+}
+```
 
 ### 5. Session Management
 
@@ -714,7 +726,7 @@ Enable detailed logging by checking console output. The package uses the `logger
 
 ## Requirements
 
-- **Package version**: 2.1.1
+- **Package version**: 2.1.2
 - **Flutter**: >= 1.17.0
 - **Dart SDK**: >= 2.19.0 < 4.0.0
 - **Android**: minSdkVersion 21+

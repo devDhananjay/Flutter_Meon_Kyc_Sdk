@@ -1,3 +1,8 @@
+## [2.1.2] - 2026-08-19
+### Added
+- `onSuccess` fires on **redirect URL navigation** (immediate) and still on **Thank You page** detection — whichever happens first.
+- `onSuccess` response includes `trigger`: `redirect_url` or `thank_you_page`.
+
 ## [2.1.1] - 2026-08-19
 ### Added
 - SSO API now sends `additional_info: { "skip": "yes" }` by default (override with `additionalInfo`).

@@ -158,6 +158,62 @@ class _MeonKYCState extends State<MeonKYC> {
           ? _ssoShortUrl!
           : _kycEntryUrl;
 
+  /// Redirect URL used for completion detection when [isRedirect] is true.
+  String? get _configuredRedirectUrl {
+    if (!widget.isRedirect) return null;
+    final redirect = widget.redirectUrl?.trim() ?? '';
+    return redirect.isNotEmpty ? redirect : 'https://www.google.com';
+  }
+
+  bool _matchesRedirectUrl(String url) {
+    final redirect = _configuredRedirectUrl;
+    if (redirect == null || redirect.isEmpty) return false;
+    if (_waitingForLogoutNavigation || url.contains('/logout')) return false;
+
+    final normalizedUrl = url.toLowerCase();
+    final normalizedRedirect = redirect.toLowerCase();
+    if (normalizedUrl.startsWith(normalizedRedirect)) return true;
+
+    try {
+      final target = Uri.parse(redirect);
+      final current = Uri.parse(url);
+      if (current.host != target.host) return false;
+
+      final targetPath = target.path.isEmpty ? '/' : target.path;
+      final currentPath = current.path.isEmpty ? '/' : current.path;
+      return currentPath == targetPath ||
+          currentPath.startsWith('$targetPath/');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _completeKycSuccess({
+    required String trigger,
+    required String url,
+    String? timestamp,
+  }) async {
+    if (_successCalled) {
+      _logger.i(
+        '[MeonKYC] Success already called, ignoring duplicate ($trigger)',
+      );
+      return;
+    }
+
+    _successCalled = true;
+    _logger.i('[MeonKYC] KYC completed successfully ($trigger)');
+
+    await _clearWebViewSession(reason: 'success');
+
+    widget.onSuccess?.call({
+      'status': 'completed',
+      'timestamp': timestamp ?? DateTime.now().toIso8601String(),
+      'url': url,
+      'message': 'KYC process completed successfully',
+      'trigger': trigger, // 'redirect_url' or 'thank_you_page'
+    });
+  }
+
   static const String _hidePageContentJs = '''
     (function() {
       try {
@@ -909,6 +965,12 @@ class _MeonKYCState extends State<MeonKYC> {
   /// Handle page started loading
   void _handlePageStarted(String url) {
     _logger.i('[MeonKYC] Page started: $url');
+
+    if (_matchesRedirectUrl(url)) {
+      _completeKycSuccess(trigger: 'redirect_url', url: url);
+      return;
+    }
+
     setState(() {
       _webViewLoading = true;
       _currentUrl = url;
@@ -1193,24 +1255,11 @@ class _MeonKYCState extends State<MeonKYC> {
       // Handle KYC success message
       if (parsedMessage['type'] == 'KYC_SUCCESS' ||
           data.contains('SUCCESS')) {
-        if (_successCalled) {
-          _logger.i('[MeonKYC] Success already called, ignoring duplicate');
-          return;
-        }
-
-        _successCalled = true;
-        _logger.i('[MeonKYC] KYC completed successfully');
-
-        // Clear WebView session before calling onSuccess
-        await _clearWebViewSession(reason: 'success');
-
-        // Call onSuccess after logout
-        widget.onSuccess?.call({
-          'status': 'completed',
-          'timestamp': parsedMessage['timestamp'] ?? DateTime.now().toIso8601String(),
-          'url': parsedMessage['url'] ?? _currentUrl,
-          'message': 'KYC process completed successfully',
-        });
+        await _completeKycSuccess(
+          trigger: 'thank_you_page',
+          url: parsedMessage['url']?.toString() ?? _currentUrl,
+          timestamp: parsedMessage['timestamp']?.toString(),
+        );
       }
       // Handle error messages
       else if (parsedMessage['type'] == 'KYC_ERROR' ||
@@ -1525,6 +1574,14 @@ class _MeonKYCState extends State<MeonKYC> {
                         if (uri == null) return NavigationActionPolicy.ALLOW;
                         final url = uri.toString();
                         _logger.i('[MeonKYC] Navigation request: $url');
+
+                        if (_matchesRedirectUrl(url)) {
+                          await _completeKycSuccess(
+                            trigger: 'redirect_url',
+                            url: url,
+                          );
+                          return NavigationActionPolicy.CANCEL;
+                        }
 
                         if (_shouldHandleExternally(url)) {
                           final handled = await _handleExternalUrl(url);
