@@ -1,6 +1,11 @@
 # flutter_meon_kyc
 
-**Current version: `2.1.2`**
+**Current version: `2.1.3`**
+
+### What's new in 2.1.3
+- WebView **subresource** errors no longer fail the whole KYC page (main-frame only).
+- Chrome `ERR_BLOCKED_BY_ORB` (and similar blocked-resource errors) are ignored so IPV is not replaced with "Failed to load KYC page".
+- IPV auto-reload is guarded so a disposed WebView does not throw `MissingPluginException`.
 
 A comprehensive Flutter package for handling Know Your Customer (KYC) processes in mobile applications. This package provides an advanced WebView-based KYC solution with automatic permission handling, IPV (In-Person Verification) support, payment link integration, SSO session start, and complete lifecycle management.
 
@@ -36,7 +41,7 @@ Add `flutter_meon_kyc` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  flutter_meon_kyc: ^2.1.2
+  flutter_meon_kyc: ^2.1.3
 ```
 
 Run:
@@ -726,7 +731,7 @@ Enable detailed logging by checking console output. The package uses the `logger
 
 ## Requirements
 
-- **Package version**: 2.1.2
+- **Package version**: 2.1.3
 - **Flutter**: >= 1.17.0
 - **Dart SDK**: >= 2.19.0 < 4.0.0
 - **Android**: minSdkVersion 21+

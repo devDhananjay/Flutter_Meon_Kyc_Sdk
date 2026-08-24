@@ -1,3 +1,9 @@
+## [2.1.3] - 2026-08-24
+### Fixed
+- Do not treat WebView subresource errors as a fatal KYC failure (main-frame only).
+- Ignore Chrome `ERR_BLOCKED_BY_ORB` / similar blocked-resource errors so IPV is not replaced with "Failed to load KYC page".
+- Guard IPV auto-reload with try/catch so a disposed WebView no longer throws `MissingPluginException`.
+
 ## [2.1.2] - 2026-08-19
 ### Added
 - `onSuccess` fires on **redirect URL navigation** (immediate) and still on **Thank You page** detection — whichever happens first.

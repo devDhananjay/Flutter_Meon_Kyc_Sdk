@@ -1077,10 +1077,19 @@ class _MeonKYCState extends State<MeonKYC> {
       final isIpvStep = _checkIfIpvStep(url);
       if (isIpvStep && !_hasReloadedAfterPermissions) {
         _hasReloadedAfterPermissions = true;
-        Future.delayed(const Duration(milliseconds: 400), () {
-          if (mounted) {
-            _logger.i('[MeonKYC] Auto-reloading IPV page after permissions granted');
-            _webViewController?.reload();
+        Future.delayed(const Duration(milliseconds: 400), () async {
+          if (!mounted || _error != null) return;
+          final controller = _webViewController;
+          if (controller == null) return;
+          try {
+            _logger.i(
+              '[MeonKYC] Auto-reloading IPV page after permissions granted',
+            );
+            await controller.reload();
+          } catch (e) {
+            _logger.w(
+              '[MeonKYC] IPV reload skipped (WebView not available): $e',
+            );
           }
         });
       }
@@ -1150,14 +1159,40 @@ class _MeonKYCState extends State<MeonKYC> {
   }
 
   /// Handle web resource error
-  void _handleWebResourceError(WebResourceError error) {
-    _logger.e('[MeonKYC] WebView error: ${error.description}');
+  void _handleWebResourceError(
+    WebResourceError error, {
+    bool isForMainFrame = true,
+  }) {
+    final description = error.description;
+    _logger.e(
+      '[MeonKYC] WebView error: $description (mainFrame=$isForMainFrame)',
+    );
+
+    // Subresource failures (ORB, images, XHR, fonts) must not kill IPV/KYC.
+    if (!isForMainFrame) {
+      _logger.w('[MeonKYC] Ignoring subresource WebView error: $description');
+      return;
+    }
+
+    // Chrome Opaque Response Blocking can still be reported as a WebView error
+    // on some Android WebView versions. The Face Finder page has already loaded.
+    if (description.contains('ERR_BLOCKED_BY_ORB') ||
+        description.contains('ERR_BLOCKED_BY_RESPONSE') ||
+        description.contains('ERR_BLOCKED_BY_CLIENT')) {
+      _logger.w('[MeonKYC] Ignoring blocked resource error: $description');
+      if (mounted) {
+        setState(() {
+          _webViewLoading = false;
+        });
+      }
+      return;
+    }
 
     // iOS: NSURLErrorDomain -999 = request cancelled (e.g., due to a reload or
     // navigation change). This is NOT a real failure and should be ignored,
     // otherwise we incorrectly show "Failed to load KYC page" while the flow
     // is still progressing (especially around Face Finder / IPV redirects).
-    if (error.description.contains('NSURLErrorDomain error -999')) {
+    if (description.contains('NSURLErrorDomain error -999')) {
       setState(() {
         _webViewLoading = false;
       });
@@ -1168,7 +1203,7 @@ class _MeonKYCState extends State<MeonKYC> {
     // upi://, gpay://, phonepe:// etc. We handle these via _handleExternalUrl
     // and the UPI app chooser, so they should NOT surface as a hard KYC error
     // in the UI.
-    if (error.description.contains('net::ERR_UNKNOWN_URL_SCHEME')) {
+    if (description.contains('net::ERR_UNKNOWN_URL_SCHEME')) {
       setState(() {
         _webViewLoading = false;
       });
@@ -1198,7 +1233,7 @@ class _MeonKYCState extends State<MeonKYC> {
     // is being recreated), we:
     //  - just show a soft snackbar
     //  - leave the current page as-is so the user can manually retry/back
-    if (error.description.contains('net::ERR_NAME_NOT_RESOLVED')) {
+    if (description.contains('net::ERR_NAME_NOT_RESOLVED')) {
       setState(() {
         _webViewLoading = false;
       });
@@ -1567,7 +1602,10 @@ class _MeonKYCState extends State<MeonKYC> {
                         }
                       },
                       onReceivedError: (controller, request, error) {
-                        _handleWebResourceError(error);
+                        _handleWebResourceError(
+                          error,
+                          isForMainFrame: request.isForMainFrame ?? true,
+                        );
                       },
                       shouldOverrideUrlLoading: (controller, navigationAction) async {
                         final uri = navigationAction.request.url;
